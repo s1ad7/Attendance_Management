@@ -5,14 +5,19 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken')
 require('dotenv').config()
 const cookieParser = require('cookie-parser');
+const QRCode = require('qrcode')
+
 
 
 const app = express()
-const secretKey = process.env.JWT_SECRET
+
 const port = 3000;
 
 app.use(express.json())
 app.use(cookieParser());
+const secretKey = process.env.JWT_SECRET
+
+
 
 function generateToken(payload,expiryIn ='1h'){
     return jwt.sign(payload, secretKey ,{expiryIn})
@@ -29,6 +34,36 @@ function checkToken(req,res,next){
             }
         })
 }
+
+function authorizedRoles(requiredRole){
+    return (req,res,next)=>{
+    const token = req.cookies.accessToken
+    
+    try{ 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET); // Make sure your secret is set in env
+    const userRole = decoded.role;
+    if(!userRole){
+        res.status(404).send('No Access')
+    console.log(userRole)
+    }
+    if(userRole === 'admin'){
+        res.status(200).send('Access granted')
+        console.log(`Access granted to admin path `)
+        next()
+    }
+    else{
+        res.status(404).send('err')
+    }
+
+
+}
+    catch {
+        console.error('Err',err)
+        res.status(505).send('Server issue')
+    }
+}}
+
+
 mongoose
 .connect('mongodb://localhost:27017/Attendance_app')
 .then(()=>{console.log(`Connected to database`)})
@@ -78,7 +113,6 @@ app.post('/login', async(req,res)=>{
         res.status(401).send(`Wrong password (to reset your password contact ur administration)`)
         console.log(`login failed by ${user.email} at ${new Date()}`)
     }
-    console.log(`login attempt by ${user.email} at ${new Date()}`)
     const {id,role} = user
     const token = jwt.sign({id,role},secretKey,{expiresIn:('1h')})
     res.cookie('accessToken', token, {
@@ -86,10 +120,10 @@ app.post('/login', async(req,res)=>{
     sameSite: 'Strict', // prevents CSRF
     maxAge: 1000 * 60 * 60 * 24 * 7 // 7 Days 
     })
-    res.send('Login successful')
+    res.status(202).send('Login successful')
 })
 
-app.get('/me', checkToken, async (req, res) => {
+app.get('/me', checkToken, authorizedRoles('admin') , async (req, res) => {
     try {
         const user = await User.findOne({ _id: req.user.id });
         if (!user) return res.status(404).send('User not found');
@@ -103,6 +137,52 @@ app.get('/me', checkToken, async (req, res) => {
         res.status(500).send('Server error');
     }
 });
+
+
+
+
+
+
+
+
+app.get('/generate-qr', checkToken , async (req, res) => {
+  const token = new Date().toString(); // Replace with dynamic token if needed
+
+  try {
+    const qrDataUrl = await QRCode.toDataURL(token);
+    
+    // Send as HTML image tag
+    res.send(`
+      <html>
+        <body>
+          <h2>Your QR Code</h2>
+          <img src="${qrDataUrl}" alt="QR Code" />
+        </body>
+      </html>
+    `);
+    
+    // Or send just the data URL (for frontend to render)
+    // res.json({ qr: qrDataUrl });
+
+  } catch (err) {
+    console.error('QR generation error:', err);
+    res.status(500).send('Failed to generate QR code');
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 app.listen(port,()=>{
     console.log(`Server is up and listening on ${port}`)
